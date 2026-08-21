@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scherm actief houden</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;min-height:100%;background:transparent;font-family:Arial,sans-serif}
+body{display:flex;align-items:center;justify-content:center;padding:8px}
+.card{width:100%;max-width:300px;padding:15px;border-radius:16px;background:rgba(30,30,34,.96);color:#fff;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,.22)}
+.icon{font-size:25px;margin-bottom:3px}.title{font-size:15px;font-weight:600;margin-bottom:8px}
+.timer{font-size:25px;font-variant-numeric:tabular-nums;margin:3px 0 10px}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:7px}
+.choice,#custom{border:1px solid #666;border-radius:9px;padding:7px 4px;font-size:12px;cursor:pointer;background:#44444b;color:#fff}
+.choice.active{background:#2e9d5b;border-color:#2e9d5b}
+#custom{width:100%;margin-bottom:7px}
+#toggle{width:100%;border:0;border-radius:10px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;background:#44444b;color:#fff}
+#toggle.on{background:#2e9d5b}
+.status{margin-top:7px;font-size:11px;opacity:.7;min-height:14px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">☀️</div>
+  <div class="title">Scherm actief houden</div>
+  <div class="timer" id="timer">00:00:00</div>
+
+  <div class="choices">
+    <button class="choice active" data-min="30">30 min</button>
+    <button class="choice" data-min="60">1 uur</button>
+    <button class="choice" data-min="120">2 uur</button>
+  </div>
+
+  <input id="custom" type="number" min="1" max="480" placeholder="Eigen tijd in minuten">
+  <button id="toggle">START</button>
+  <div class="status" id="status"></div>
+</div>
+
+<!-- Onzichtbare video. De stream wordt pas gestart na de knopklik. -->
+<video id="keepAwakeVideo" playsinline muted style="position:absolute;width:1px;height:1px;opacity:.01;pointer-events:none"></video>
+
+<script>
+let endTime=null, interval=null, selectedMinutes=30, videoStream=null, videoTrack=null;
+const timer=document.getElementById('timer');
+const toggle=document.getElementById('toggle');
+const status=document.getElementById('status');
+const custom=document.getElementById('custom');
+const choices=document.querySelectorAll('.choice');
+const video=document.getElementById('keepAwakeVideo');
+
+function formatTime(ms){
+  const total=Math.max(0,Math.ceil(ms/1000));
+  const h=String(Math.floor(total/3600)).padStart(2,'0');
+  const m=String(Math.floor((total%3600)/60)).padStart(2,'0');
+  const s=String(total%60).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+function updateTimer(){
+  if(!endTime){timer.textContent='00:00:00';return}
+  const left=endTime-Date.now();
+  if(left<=0){stop();status.textContent='Tijd voorbij';return}
+  timer.textContent=formatTime(left);
+}
+
+/* Start een heel klein canvas-videostreampje. Dit gebruikt echte video playback,
+   maar toont niets aan de gebruiker. */
+async function startVideoKeepAwake(){
+  try{
+    const canvas=document.createElement('canvas');
+    canvas.width=2; canvas.height=2;
+    const ctx=canvas.getContext('2d');
+    let frame=0;
+    const draw=()=>{frame++;ctx.fillStyle=frame%2?'#000':'#010101';ctx.fillRect(0,0,2,2)};
+    draw();
+    videoStream=canvas.captureStream(1);
+    video.srcObject=videoStream;
+    video.muted=true;
+    await video.play();
+    videoTrack=videoStream.getVideoTracks()[0];
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+function stopVideoKeepAwake(){
+  try{video.pause()}catch(e){}
+  if(videoStream) videoStream.getTracks().forEach(t=>t.stop());
+  videoStream=null; videoTrack=null; video.srcObject=null;
+}
+
+async function start(){
+  const customValue=parseInt(custom.value,10);
+  if(customValue>0) selectedMinutes=Math.min(customValue,480);
+
+  const videoOK=await startVideoKeepAwake();
+  endTime=Date.now()+selectedMinutes*60000;
+  toggle.textContent='STOP';
+  toggle.classList.add('on');
+  status.textContent=videoOK ? 'Actief — scherm wordt wakker gehouden' : 'Timer actief';
+  updateTimer();
+  clearInterval(interval);
+  interval=setInterval(updateTimer,250);
+}
+
+function stop(){
+  clearInterval(interval); interval=null; endTime=null;
+  stopVideoKeepAwake();
+  timer.textContent='00:00:00';
+  toggle.textContent='START';
+  toggle.classList.remove('on');
+  status.textContent='';
+}
+
+choices.forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    choices.forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMinutes=Number(btn.dataset.min);
+    custom.value='';
+  });
+});
+
+custom.addEventListener('input',()=>{
+  choices.forEach(b=>b.classList.remove('active'));
+  const value=parseInt(custom.value,10);
+  if(value>0) selectedMinutes=Math.min(value,480);
+});
+
+toggle.addEventListener('click',()=>{
+  if(endTime) stop(); else start();
+});
+
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible' && endTime && !videoStream){
+    await startVideoKeepAwake();
+  }
+});
+</script>
+</body>
+</html>
